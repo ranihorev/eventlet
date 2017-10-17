@@ -515,3 +515,7 @@ def test_threading_current():
 
 def test_threadpoolexecutor():
     tests.run_isolated('patcher_threadpoolexecutor.py')
+
+    
+def test_urllib_exception_identity():
+    tests.run_isolated('urllib_exception_identity.py')
