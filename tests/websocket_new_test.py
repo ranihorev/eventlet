@@ -1,6 +1,7 @@
 import errno
-import struct
+import os
 import re
+import struct
 
 import eventlet
 from eventlet import event
@@ -230,6 +231,30 @@ class TestWebSocket(tests.wsgi_test._TestBase):
         done_with_request.wait()
         assert not error_detected[0]
 
+    def test_client_timeout_fd_leak(self):
+        connect = '\r\n'.join((
+            'GET /echo HTTP/1.1',
+            'Upgrade: websocket',
+            'Connection: Upgrade',
+            'Host: ' + self.server_netloc,
+            'Origin: http://' + self.server_netloc,
+            'Sec-WebSocket-Version: 13',
+            'Sec-WebSocket-Key: d9MXuOzlVQ0h+qRllvSCIg==',
+            '\r\n',
+        )).encode()
+        self.spawn_server(socket_timeout=0.5)
+        sock = eventlet.connect(self.server_addr)
+        sock.sendall(connect)
+        established = sock.recv(1024)
+        assert established.startswith(b'HTTP/1.1 101 ')
+        assert len(self.server_fds) == 1
+        fd = self.server_fds[0]
+        error = sock.recv(1024)
+        assert error == b'\x88\x17\x03\xf3Internal Server Error'
+        closed = sock.recv(1)
+        assert closed == b''
+        print(os.fstat(fd))
+
 
 class TestWebSocketWithCompression(tests.wsgi_test._TestBase):
     TEST_TIMEOUT = 5
@@ -255,7 +280,7 @@ class TestWebSocketWithCompression(tests.wsgi_test._TestBase):
             'Upgrade: websocket',
             'Connection: Upgrade',
             'Sec-WebSocket-Accept: ywSyWXCPNsDxLrQdQrn5RFNRfBU=',
-            'Sec-WebSocket-Extensions: (.+)'
+            'Sec-WebSocket-Extensions: (.+)',
             '\r\n',
         ])))
 

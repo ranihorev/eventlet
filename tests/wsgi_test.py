@@ -2,6 +2,7 @@
 import cgi
 import collections
 import errno
+import functools
 import os
 import shutil
 import signal
@@ -223,6 +224,7 @@ class _TestBase(tests.LimitedTestCase):
         self.site = Site()
         self.killer = None
         self.set_site()
+        self.server_fds = []
         self.spawn_server()
 
     def tearDown(self):
@@ -236,6 +238,7 @@ class _TestBase(tests.LimitedTestCase):
 
         Sets `self.server_addr` to (host, port) tuple suitable for `socket.connect`.
         """
+        self.server_fds[:] = []
         self.logfile = six.StringIO()
         new_kwargs = dict(max_size=128,
                           log=self.logfile,
@@ -244,6 +247,19 @@ class _TestBase(tests.LimitedTestCase):
 
         if 'sock' not in new_kwargs:
             new_kwargs['sock'] = eventlet.listen(('localhost', 0))
+
+        def wrap_accept(sock):
+            original = sock.accept
+
+            @functools.wraps(original)
+            def wrapped(*a, **kw):
+                t = original(*a, **kw)
+                self.server_fds.append(t[0].fileno())
+                return t
+
+            sock.accept = wrapped
+
+        wrap_accept(new_kwargs['sock'])
 
         self.server_addr = new_kwargs['sock'].getsockname()
         self.spawn_thread(wsgi.server, **new_kwargs)
@@ -262,6 +278,10 @@ class _TestBase(tests.LimitedTestCase):
 
     def set_site(self):
         raise NotImplementedError
+
+    @property
+    def server_netloc(self):
+        return '{a[0]}:{a[1]}'.format(a=self.server_addr)
 
 
 class TestHttpd(_TestBase):
