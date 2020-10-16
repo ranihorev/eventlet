@@ -529,6 +529,41 @@ class TestWebSocket(tests.wsgi_test._TestBase):
             pool.waitall()
 
 
+    def test_wrapped_wsgi(self):
+        site = self.site
+
+        def wrapper(environ, start_response):
+            for chunk in site(environ, start_response):
+                yield chunk
+
+        self.site = wrapper
+        self.spawn_server()
+        connect = [
+            "GET /range HTTP/1.1",
+            "Upgrade: WebSocket",
+            "Connection: Upgrade",
+            "Host: %s:%s" % self.server_addr,
+            "Origin: http://%s:%s" % self.server_addr,
+            "WebSocket-Protocol: ws",
+        ]
+        sock = eventlet.connect(self.server_addr)
+
+        sock.sendall(six.b('\r\n'.join(connect) + '\r\n\r\n'))
+        resp = sock.recv(1024)
+        headers, result = resp.split(b'\r\n\r\n')
+        msgs = [result.strip(b'\x00\xff')]
+        cnt = 9
+        while cnt:
+            msgs.append(sock.recv(20).strip(b'\x00\xff'))
+            cnt -= 1
+        self.assertEqual(msgs, [six.b('msg %d' % i) for i in range(10)])
+        # In case of server error, server will write HTTP 500 response to the socket
+        msg = sock.recv(20)
+        assert not msg
+        sock.close()
+        eventlet.sleep(0.01)
+
+
 class TestWebSocketSSL(tests.wsgi_test._TestBase):
     def set_site(self):
         self.site = wsapp
